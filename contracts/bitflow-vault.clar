@@ -316,3 +316,96 @@
       (user-position (unwrap! (map-get? UserPositions tx-sender) ERR-NOT-AUTHORIZED))
       (proposal-id (+ (var-get proposal-count) u1))
     )
+    ;; Validate proposer qualifications
+    (asserts! (>= (get voting-power user-position) u1000000) ERR-NOT-AUTHORIZED)
+    (asserts! (is-valid-description description) ERR-INVALID-PROTOCOL)
+    (asserts! (is-valid-voting-period voting-period) ERR-INVALID-PROTOCOL)
+
+    ;; Create comprehensive proposal record
+    (map-set Proposals { proposal-id: proposal-id } {
+      creator: tx-sender,
+      description: description,
+      start-block: stacks-block-height,
+      end-block: (+ stacks-block-height voting-period),
+      executed: false,
+      votes-for: u0,
+      votes-against: u0,
+      minimum-votes: u1000000,
+    })
+
+    ;; Update global proposal counter
+    (var-set proposal-count proposal-id)
+    (ok proposal-id)
+  )
+)
+
+;; Weighted voting system for governance participation
+(define-public (vote-on-proposal
+    (proposal-id uint)
+    (vote-for bool)
+  )
+  (let (
+      (proposal (unwrap! (map-get? Proposals { proposal-id: proposal-id })
+        ERR-INVALID-PROTOCOL
+      ))
+      (user-position (unwrap! (map-get? UserPositions tx-sender) ERR-NOT-AUTHORIZED))
+      (voting-power (get voting-power user-position))
+      (max-proposal-id (var-get proposal-count))
+    )
+    ;; Validate voting eligibility and timing
+    (asserts! (< stacks-block-height (get end-block proposal)) ERR-NOT-AUTHORIZED)
+    (asserts! (and (> proposal-id u0) (<= proposal-id max-proposal-id))
+      ERR-INVALID-PROTOCOL
+    )
+
+    ;; Record weighted vote with power-based influence
+    (map-set Proposals { proposal-id: proposal-id }
+      (merge proposal {
+        votes-for: (if vote-for
+          (+ (get votes-for proposal) voting-power)
+          (get votes-for proposal)
+        ),
+        votes-against: (if vote-for
+          (get votes-against proposal)
+          (+ (get votes-against proposal) voting-power)
+        ),
+      })
+    )
+    (ok true)
+  )
+)
+
+;; Emergency protocol pause mechanism
+(define-public (pause-contract)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (var-set contract-paused true)
+    (ok true)
+  )
+)
+
+;; Protocol operations resumption control
+(define-public (resume-contract)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (var-set contract-paused false)
+    (ok true)
+  )
+)
+
+;; READ-ONLY QUERY FUNCTIONS
+
+;; Protocol ownership verification
+(define-read-only (get-contract-owner)
+  (ok CONTRACT-OWNER)
+)
+
+;; Total value locked query
+(define-read-only (get-stx-pool)
+  (ok (var-get stx-pool))
+)
+
+;; Governance activity metrics
+(define-read-only (get-proposal-count)
+  (ok (var-get proposal-count))
+)
